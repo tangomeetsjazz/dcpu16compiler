@@ -5,6 +5,7 @@ import sys
 # Lexer
 reserved = {
    'function' : "FUNCTION",
+   'return' : "RETURN",
    'if' : 'IF',
    'else' : 'ELSE',
    'while' : 'WHILE',
@@ -14,28 +15,33 @@ reserved = {
 }
 
 tokens = (
-    "PLUS", "MINUS", "TIMES", "DIVIDE",
+    "MOD", "PLUS", "MINUS", "TIMES", "DIVIDE",
     "COMPARISON", "AND", "OR",
-    "FUNCTION", "IF", "ELSE", "WHILE", "FOR",
+    "FUNCTION", "RETURN", "IF", "ELSE", "WHILE", "FOR",
     "SCREEN", "NAME", "NUMBER"
 )
 
 literals = [';', '=', '(', ')', '{', '}', '[', ']']
 
+t_MOD = "%"
 t_PLUS = "\+"
 t_MINUS = "-"
 t_TIMES = "\*"
 t_DIVIDE = "/"
-t_MOD = "%"
 t_COMPARISON = r"[><!=]="
 t_AND = "&&"
 t_OR = "\|\|"
 t_FUNCTION = "function"
+t_RETURN = "return"
 t_IF = "if"
 t_ELSE = "else"
 t_WHILE = "while"
 t_FOR = "for"
 t_SCREEN = r"SCREEN|screen"
+
+def t_SCREEN_WIDTH(t):
+    "SCREEN_WIDTH"
+    return SCREEN_WIDTH
 
 def t_NAME(t):
     r"[_a-zA-Z][_a-zA-Z0-9]*"
@@ -55,7 +61,6 @@ def t_error(t):
 # Parser
 
 VARIABLE_ADDRESS_RANGE = (0x2000, 0x7000)
-SCREEN_WIDTH = 32
 
 class Variable:
     def __init__(self, name, address, context):
@@ -118,7 +123,10 @@ class Context:
         self.varsByName[var.name].append(var)
     
     def removeVariable(self, var):
-        del self.varsByAddress[var.address]
+        if self.parent:
+            self.parent.removeVariable(var)
+        if var.address in self.varsByAddress:
+            del self.varsByAddress[var.address]
         if var.name in self.varsByName:
             self.varsByName[var.name].remove(var)
     
@@ -151,6 +159,7 @@ precedence = (
     ('left', 'OR'),
     ('left', 'AND'),
     ('left', 'COMPARISON'),
+    ('left', 'MOD'),
     ('left', 'PLUS', 'MINUS'),
     ('left', 'TIMES', 'DIVIDE'),
 )
@@ -181,12 +190,35 @@ def p_construct(t):
     t[0] = t[1]
 
 def p_function(t):
-    """function : FUNCTION NAME '(' ')' '{' lines '}'"""
-    t[0] = ("""
+    """function : start_context FUNCTION NAME '(' ')' '{' lines return '}' end_context"""
+    
+    if t[3] in ["start", "end"]:
+        t[0] = """
 :%s
 %s
-""" + ("set PC, POP" if t[2] != "start" else "") + """
-""").strip() % (t[2], t[6])
+""".strip() % (t[3], t[7])
+    else:
+        t[0] = """
+:%s
+%s
+%s
+""".strip() % (t[3], t[7], t[8])
+
+def p_return(t):
+    """return :
+              | RETURN variable ';'
+              | RETURN ';'
+    """
+    
+    if 2 in t and t[2] != ";":
+        t[0] = """
+set a, %s
+set PC, POP
+""".strip() % (t[2],)
+    else:
+        t[0] = """
+set PC, POP
+""".strip()
 
 def p_control(t):
     """control : while_loop
@@ -223,7 +255,7 @@ set PC, %sstart
 """.strip() % (t[4], tagName, t[6], tagName, t[11], t[8], tagName, tagName)
 
 def p_if_control_plain(t):
-    """if_control : IF '(' clause ')' '{' lines '}'"""
+    """if_control : IF '(' clause ')' '{' start_context lines end_context '}'"""
     tagName = t.lexer.program.getUniqueTag("if")
     t[0] = """
 %s
@@ -231,10 +263,10 @@ ifn a, 1
 set PC, %send
 %s
 :%send
-""".strip() % (t[3], tagName, t[6], tagName)
+""".strip() % (t[3], tagName, t[7], tagName)
 
 def p_if_control_with_else(t):
-    """if_control : IF '(' clause ')' '{' lines '}' ELSE '{' lines '}'"""
+    """if_control : IF '(' clause ')' '{' start_context lines end_context '}' ELSE '{' start_context lines end_context '}'"""
     
     tagName = t.lexer.program.getUniqueTag("if")
     t[0] = """
@@ -244,10 +276,10 @@ set PC, %selse
 %s
 :%selse
 %s
-""".strip() % (t[3], tagName, t[6], tagName, t[10])
+""".strip() % (t[3], tagName, t[7], tagName, t[13])
 
 def p_if_control_with_else_if(t):
-    """if_control : IF '(' clause ')' '{' lines '}' ELSE if_control"""
+    """if_control : IF '(' clause ')' '{' start_context lines end_context '}' ELSE if_control"""
     
     tagName = t.lexer.program.getUniqueTag("if")
     t[0] = """
@@ -259,7 +291,7 @@ set PC, %send
 :%selseif
 %s
 :%send
-""".strip() % (t[3], tagName, t[6], tagName, tagName, t[10], tagName)
+""".strip() % (t[3], tagName, t[7], tagName, tagName, t[11], tagName)
 
 def p_statement(t):
     """statement : assignment"""
@@ -273,17 +305,18 @@ set %s, a
 """.strip() % (t[3], t[1])
 
 def p_assignment_screen(t):
-    """assignment : SCREEN '[' value ']' '[' value ']' '=' value"""
+    """assignment : SCREEN '[' operation ']' '=' operation"""
     t[0] = """
-set a, %s
-mul a, %d
-add a, %s
-add a, 0x8000
-set [a], %s
-""".strip() % (t[3], SCREEN_WIDTH, t[6], t[9])
+%s
+set b, a
+add b, 0x8000
+%s
+set [b], a
+""".strip() % (t[3], t[6])
 
 def p_expr(t):
     """expr : function_call
+            | return
             | clause
             | operation
     """
@@ -291,9 +324,10 @@ def p_expr(t):
 
 def p_function_call(t):
     """function_call : NAME '(' ')'"""
-    t[0] = """
-jsr %s
-""".strip() % (t[1],)
+    if t[1] == "exit":
+        t[0] = "set PC, end"
+    else:
+        t[0] = "jsr %s" % (t[1],)
 
 def p_clause_comparison(t):
     """clause : value COMPARISON value"""
@@ -353,6 +387,7 @@ def p_operation_execute(t):
                  | operation DIVIDE operation
                  | operation PLUS operation
                  | operation MINUS operation
+                 | operation MOD operation
     """
     opr = None
     if t[2] == "*":
@@ -363,6 +398,8 @@ def p_operation_execute(t):
         opr = "add"
     elif t[2] == "-":
         opr = "sub"
+    elif t[2] == "%":
+        opr = "mod"
     t[0] = """
 %s
 set b, a

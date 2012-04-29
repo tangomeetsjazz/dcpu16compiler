@@ -110,6 +110,17 @@ class ContextTest(unittest.TestCase):
         self.assertTrue(result1 == parent.getVariable("var1"))
         self.assertFalse(result2 == context.getVariable("var2"))
     
+    def testDestroyAtMultipleLevels(self):
+        root = Context()
+        context1 = Context(root)
+        context2 = Context(context1)
+        
+        result = context2.getVariable("var2")
+        
+        context2.destroy()
+        
+        self.assertFalse(result == context2.getVariable("var2"))
+    
 class ProgramTest(unittest.TestCase):
     def testGetUniqueId(self):
         program = Program()
