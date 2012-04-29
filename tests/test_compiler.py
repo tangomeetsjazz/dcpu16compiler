@@ -1,17 +1,11 @@
 import unittest
 from dcpu16.compiler import VARIABLE_ADDRESS_RANGE, Variable, Context, Program
 
-class VariableTest(unittest.TestCase):
-    def testToMemoryAddress(self):
-        for address in [235, 504, 12, 1]:
-            self.assertEqual(self.getMemoryAddress(address), Variable("var1", address, Context()).toMemoryAddress())
-    
-    def getMemoryAddress(self, address):
-        address += VARIABLE_ADDRESS_RANGE[0]
-        hexStr = hex(address)
-        while len(hexStr) < 6:
-            hexStr = hexStr[0:2] + "0" + hexStr[2:]
-        return "[" + hexStr + "]"
+def toMemoryAddress(offset):
+    hexStr = hex(VARIABLE_ADDRESS_RANGE[0] + offset)
+    while len(hexStr) < 6:
+        hexStr = hexStr[0:2] + "0" + hexStr[2:]
+    return hexStr
 
 class ContextTest(unittest.TestCase):
     def setUp(self):
@@ -25,45 +19,55 @@ class ContextTest(unittest.TestCase):
     def testGetNextMemoryAddressWithoutParentContext(self):
         context = Context()
         
-        self.assertEqual(0, context.getNextAddress())
+        address0 = toMemoryAddress(0)
+        address1 = toMemoryAddress(1)
+        address2 = toMemoryAddress(2)
+        address3 = toMemoryAddress(3)
         
-        context.varsByAddress[0] = Variable("var1", 0, Context())
+        self.assertEqual(address0, context.getNextAddress())
         
-        self.assertEqual(1, context.getNextAddress())
+        context.varsByAddress[address0] = Variable("var1", address0, Context())
         
-        context.varsByAddress[2] = Variable("var2", 2, Context())
+        self.assertEqual(address1, context.getNextAddress())
         
-        self.assertEqual(1, context.getNextAddress())
+        context.varsByAddress[address2] = Variable("var2", address2, Context())
         
-        context.varsByAddress[1] = Variable("var3", 1, Context())
+        self.assertEqual(address1, context.getNextAddress())
         
-        self.assertEqual(3, context.getNextAddress())
+        context.varsByAddress[address1] = Variable("var3", address1, Context())
         
-        del context.varsByAddress[0]
+        self.assertEqual(address3, context.getNextAddress())
         
-        self.assertEqual(0, context.getNextAddress())
+        del context.varsByAddress[address0]
+        
+        self.assertEqual(address0, context.getNextAddress())
     
     def testGetNextMemoryAddressWithParentContext(self):
         parent = Context()
         context = Context(parent)
         
-        self.assertEqual(0, context.getNextAddress())
+        address0 = toMemoryAddress(0)
+        address1 = toMemoryAddress(1)
+        address2 = toMemoryAddress(2)
+        address3 = toMemoryAddress(3)
         
-        parent.varsByAddress[0] = Variable("var1", 0, Context())
+        self.assertEqual(address0, context.getNextAddress())
         
-        self.assertEqual(1, context.getNextAddress())
+        parent.varsByAddress[address0] = Variable("var1", address0, Context())
         
-        parent.varsByAddress[2] = Variable("var2", 2, Context())
+        self.assertEqual(address1, context.getNextAddress())
         
-        self.assertEqual(1, context.getNextAddress())
+        parent.varsByAddress[address2] = Variable("var2", address2, Context())
         
-        parent.varsByAddress[1] = Variable("var3", 1, Context())
+        self.assertEqual(address1, context.getNextAddress())
         
-        self.assertEqual(3, context.getNextAddress())
+        parent.varsByAddress[address1] = Variable("var3", address1, Context())
         
-        del parent.varsByAddress[0]
+        self.assertEqual(address3, context.getNextAddress())
         
-        self.assertEqual(0, context.getNextAddress())
+        del parent.varsByAddress[address0]
+        
+        self.assertEqual(address0, context.getNextAddress())
     
     def testGetVariableWithoutParentContext(self):
         context = Context()
